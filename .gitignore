@@ -1,0 +1,18 @@
+# Built binary (anchored to repo root so it never matches a source dir)
+/kms-rotation-audit
+/kms-rotation-audit-bin
+/dist/
+
+# Go build/test artifacts
+*.exe
+*.test
+*.out
+coverage.txt
+
+# Editor/OS noise
+.DS_Store
+.idea/
+.vscode/
+
+# Never ignore test fixtures
+!examples/**
