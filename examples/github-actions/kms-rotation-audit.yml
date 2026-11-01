@@ -1,0 +1,34 @@
+# Example GitHub Actions workflow: fail the job when a customer-managed KMS
+# key has automatic rotation disabled or rotates less often than 180 days.
+#
+# Copy to .github/workflows/ in the repository that owns the AWS account.
+# The role needs kms:ListKeys, kms:DescribeKey and kms:GetKeyRotationStatus.
+name: kms-rotation-audit
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for configure-aws-credentials
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: "1.26"
+
+      - uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::111122223333:role/kms-rotation-audit
+          aws-region: us-east-1
+
+      - name: Install
+        run: go install github.com/moveeeax/kms-rotation-audit@latest
+
+      - name: Audit
+        run: kms-rotation-audit audit --region us-east-1 --max-days 180
