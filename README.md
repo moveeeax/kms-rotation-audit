@@ -24,8 +24,10 @@ at pull-request time and, optionally, fixes it.
    than `N` days.
 4. `audit` exits **1** when it finds a violation, so it gates CI. `fix` runs
    the same scan and then calls `EnableKeyRotation` on each flagged key;
-   with `--max-days N` it also sets the rotation period to `N` days (KMS
-   accepts 90 to 2560, so `fix` rejects a smaller `N`).
+   with `--max-days N` it also sets the rotation period to `min(N, 365)`
+   days. A tight `N` brings slow keys within the policy; a loose `N` never
+   stretches a key past the 365-day KMS default. KMS accepts periods of at
+   least 90 days, so `fix` rejects a smaller `N`.
 
 ## Install
 
@@ -74,7 +76,7 @@ See [`examples/`](examples/) for JSON output and a CI snippet.
 | Flag | Meaning |
 | --- | --- |
 | `--json` | Emit findings as a JSON array instead of a table. |
-| `--max-days N` | Also flag enabled keys whose rotation period exceeds `N` days. With `fix`, set the rotation period of flagged keys to `N` (90 to 2560). |
+| `--max-days N` | Also flag enabled keys whose rotation period exceeds `N` days. With `fix`, set the rotation period of flagged keys to `min(N, 365)`; `N` below 90 is rejected. |
 | `--region R` | AWS region (defaults to the SDK's resolved region). |
 | `--profile P` | Shared-config profile to use. |
 

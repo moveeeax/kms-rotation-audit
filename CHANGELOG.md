@@ -8,8 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- `fix --max-days N` now sets the rotation period of flagged keys to `N`
-  days. Before, keys flagged for a slow period were reported as fixed but
+- `fix --max-days N` now sets the rotation period of flagged keys to
+  `min(N, 365)` days, so a loose `N` never lengthens a period past the KMS
+  default. Before, keys flagged for a slow period were reported as fixed but
   kept their period, and newly enabled keys got the 365-day default.
   `fix` rejects `--max-days` below 90, the KMS minimum.
 

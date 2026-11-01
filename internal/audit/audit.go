@@ -110,12 +110,13 @@ func inspect(ctx context.Context, c KMSAPI, id string, opts Options) (f *Finding
 	return nil, false, nil
 }
 
-// Bounds of RotationPeriodInDays accepted by EnableKeyRotation. When the
-// parameter is omitted, KMS uses a 365-day period.
+// Bounds of RotationPeriodInDays accepted by EnableKeyRotation, and the
+// period KMS uses when the parameter is omitted.
 // https://docs.aws.amazon.com/kms/latest/APIReference/API_EnableKeyRotation.html
 const (
-	MinRotationPeriodDays = 90
-	MaxRotationPeriodDays = 2560
+	MinRotationPeriodDays     = 90
+	MaxRotationPeriodDays     = 2560
+	DefaultRotationPeriodDays = 365
 )
 
 // ValidateFixMaxDays reports whether Fix can bring keys within maxDays.
@@ -129,20 +130,21 @@ func ValidateFixMaxDays(maxDays int) error {
 }
 
 // Fix enables rotation on each flagged key and returns the ids it changed.
-// When opts.MaxDays is set, it also sets the rotation period to opts.MaxDays,
-// so keys flagged for a slow period (or enabled with the 365-day default)
-// end up within the policy. EnableKeyRotation updates the period of a key
-// whose rotation is already on.
+// When opts.MaxDays is set, it also sets the rotation period to
+// min(opts.MaxDays, DefaultRotationPeriodDays). A tighter policy brings
+// slow keys within it; a looser one never stretches a key past the KMS
+// default, so `fix --max-days 2000` does not enable rotation with a
+// 2000-day period. The period is sent explicitly rather than omitted
+// because EnableKeyRotation also modifies the period of a key whose
+// rotation is already on.
 func Fix(ctx context.Context, c KMSAPI, findings []Finding, opts Options) ([]string, error) {
 	if err := ValidateFixMaxDays(opts.MaxDays); err != nil {
 		return nil, err
 	}
 	var period *int32
-	if opts.MaxDays >= MinRotationPeriodDays && opts.MaxDays <= MaxRotationPeriodDays {
-		period = aws.Int32(int32(opts.MaxDays))
+	if opts.MaxDays > 0 {
+		period = aws.Int32(int32(min(opts.MaxDays, DefaultRotationPeriodDays)))
 	}
-	// A MaxDays above MaxRotationPeriodDays is satisfied by the 365-day
-	// default, so the period is left unset in that case.
 
 	var fixed []string
 	for _, f := range findings {

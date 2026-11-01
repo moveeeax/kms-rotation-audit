@@ -2,6 +2,7 @@ package audit
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -193,13 +194,21 @@ func TestFixSetsPeriodToMaxDays(t *testing.T) {
 	}
 }
 
-func TestFixMaxDaysAboveKMSLimitKeepsDefault(t *testing.T) {
-	f := &fakeKMS{}
-	if _, err := Fix(context.Background(), f, []Finding{{KeyID: "k1"}}, Options{MaxDays: 3000}); err != nil {
-		t.Fatal(err)
-	}
-	if f.periods[0] != nil {
-		t.Fatalf("max-days above %d must not be sent, got %d", MaxRotationPeriodDays, *f.periods[0])
+func TestFixLooseMaxDaysCapsAtDefault(t *testing.T) {
+	for _, maxDays := range []int{365, 1000, 2560, 3000} {
+		f := &fakeKMS{}
+		findings := []Finding{
+			{KeyID: "off", Reason: "automatic rotation disabled"},
+			{KeyID: "slow", Reason: fmt.Sprintf("rotation period 2560d exceeds max %dd", maxDays)},
+		}
+		if _, err := Fix(context.Background(), f, findings, Options{MaxDays: maxDays}); err != nil {
+			t.Fatal(err)
+		}
+		for i, p := range f.periods {
+			if p == nil || *p != DefaultRotationPeriodDays {
+				t.Fatalf("max-days %d, key %s: want RotationPeriodInDays=%d, got %v", maxDays, f.enabled[i], DefaultRotationPeriodDays, p)
+			}
+		}
 	}
 }
 

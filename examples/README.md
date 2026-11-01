@@ -37,9 +37,10 @@ kms-rotation-audit fix --region us-east-1
 ```
 
 With `--max-days N`, `fix` also sets each flagged key's rotation period to
-`N` days, so keys flagged for a slow period come back clean on the next
-audit. KMS accepts periods from 90 to 2560 days; `fix` refuses a
-`--max-days` below 90 because no key could satisfy it:
+`min(N, 365)` days, so keys flagged for a slow period come back clean on the
+next audit, and a loose `N` such as 2000 never makes rotation rarer than the
+365-day KMS default. KMS accepts periods from 90 to 2560 days; `fix` refuses
+a `--max-days` below 90 because no key could satisfy it:
 
 ```shell
 kms-rotation-audit fix --region us-east-1 --max-days 180
