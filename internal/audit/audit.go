@@ -110,12 +110,47 @@ func inspect(ctx context.Context, c KMSAPI, id string, opts Options) (f *Finding
 	return nil, false, nil
 }
 
+// Bounds of RotationPeriodInDays accepted by EnableKeyRotation, and the
+// period KMS uses when the parameter is omitted.
+// https://docs.aws.amazon.com/kms/latest/APIReference/API_EnableKeyRotation.html
+const (
+	MinRotationPeriodDays     = 90
+	MaxRotationPeriodDays     = 2560
+	DefaultRotationPeriodDays = 365
+)
+
+// ValidateFixMaxDays reports whether Fix can bring keys within maxDays.
+// KMS rejects rotation periods shorter than MinRotationPeriodDays, so a
+// tighter policy can be audited but never remediated.
+func ValidateFixMaxDays(maxDays int) error {
+	if maxDays > 0 && maxDays < MinRotationPeriodDays {
+		return fmt.Errorf("--max-days %d is below the KMS minimum rotation period of %d days; fix cannot satisfy it", maxDays, MinRotationPeriodDays)
+	}
+	return nil
+}
+
 // Fix enables rotation on each flagged key and returns the ids it changed.
-func Fix(ctx context.Context, c KMSAPI, findings []Finding) ([]string, error) {
+// When opts.MaxDays is set, it also sets the rotation period to
+// min(opts.MaxDays, DefaultRotationPeriodDays). A tighter policy brings
+// slow keys within it; a looser one never stretches a key past the KMS
+// default, so `fix --max-days 2000` does not enable rotation with a
+// 2000-day period. The period is sent explicitly rather than omitted
+// because EnableKeyRotation also modifies the period of a key whose
+// rotation is already on.
+func Fix(ctx context.Context, c KMSAPI, findings []Finding, opts Options) ([]string, error) {
+	if err := ValidateFixMaxDays(opts.MaxDays); err != nil {
+		return nil, err
+	}
+	var period *int32
+	if opts.MaxDays > 0 {
+		period = aws.Int32(int32(min(opts.MaxDays, DefaultRotationPeriodDays)))
+	}
+
 	var fixed []string
 	for _, f := range findings {
 		id := f.KeyID
-		if _, err := c.EnableKeyRotation(ctx, &kms.EnableKeyRotationInput{KeyId: &id}); err != nil {
+		in := &kms.EnableKeyRotationInput{KeyId: &id, RotationPeriodInDays: period}
+		if _, err := c.EnableKeyRotation(ctx, in); err != nil {
 			return fixed, fmt.Errorf("enable rotation %s: %w", id, err)
 		}
 		fixed = append(fixed, id)

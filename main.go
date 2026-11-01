@@ -27,6 +27,8 @@ Usage:
 Commands:
   audit   Report keys with rotation disabled. Exit 1 if any are found.
   fix     Same scan, then call EnableKeyRotation on every flagged key.
+          With --max-days N (N >= 90) the rotation period is set to
+          min(N, 365), so a loose N never lengthens it past the KMS default.
 
 Flags:
   --json        Emit findings as JSON instead of a table.
@@ -68,6 +70,12 @@ func run(args []string) error {
 		return err
 	}
 
+	if cmd == "fix" {
+		if err := audit.ValidateFixMaxDays(*maxDays); err != nil {
+			return err
+		}
+	}
+
 	ctx := context.Background()
 	var opts []func(*config.LoadOptions) error
 	if *region != "" {
@@ -82,13 +90,14 @@ func run(args []string) error {
 	}
 	client := kms.NewFromConfig(cfg)
 
-	findings, err := audit.Audit(ctx, client, audit.Options{MaxDays: *maxDays})
+	auditOpts := audit.Options{MaxDays: *maxDays}
+	findings, err := audit.Audit(ctx, client, auditOpts)
 	if err != nil {
 		return err
 	}
 
 	if cmd == "fix" && len(findings) > 0 {
-		fixed, err := audit.Fix(ctx, client, findings)
+		fixed, err := audit.Fix(ctx, client, findings, auditOpts)
 		if err != nil {
 			return err
 		}

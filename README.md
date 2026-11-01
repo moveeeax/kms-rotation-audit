@@ -1,7 +1,7 @@
 # kms-rotation-audit
 
 [![ci](https://github.com/moveeeax/kms-rotation-audit/actions/workflows/ci.yml/badge.svg)](https://github.com/moveeeax/kms-rotation-audit/actions/workflows/ci.yml)
-[![Go](https://img.shields.io/badge/go-1.24-00ADD8?logo=go)](https://go.dev)
+[![Go](https://img.shields.io/badge/go-1.26+-00ADD8?logo=go)](https://go.dev)
 [![license: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Audit AWS KMS **customer-managed** keys for disabled automatic rotation and
@@ -23,7 +23,11 @@ at pull-request time and, optionally, fixes it.
    `--max-days N` it also flags an enabled key whose rotation period is longer
    than `N` days.
 4. `audit` exits **1** when it finds a violation, so it gates CI. `fix` runs
-   the same scan and then calls `EnableKeyRotation` on each flagged key.
+   the same scan and then calls `EnableKeyRotation` on each flagged key;
+   with `--max-days N` it also sets the rotation period to `min(N, 365)`
+   days. A tight `N` brings slow keys within the policy; a loose `N` never
+   stretches a key past the 365-day KMS default. KMS accepts periods of at
+   least 90 days, so `fix` rejects a smaller `N`.
 
 ## Install
 
@@ -72,7 +76,7 @@ See [`examples/`](examples/) for JSON output and a CI snippet.
 | Flag | Meaning |
 | --- | --- |
 | `--json` | Emit findings as a JSON array instead of a table. |
-| `--max-days N` | Also flag enabled keys whose rotation period exceeds `N` days. |
+| `--max-days N` | Also flag enabled keys whose rotation period exceeds `N` days. With `fix`, set the rotation period of flagged keys to `min(N, 365)`; `N` below 90 is rejected. |
 | `--region R` | AWS region (defaults to the SDK's resolved region). |
 | `--profile P` | Shared-config profile to use. |
 
