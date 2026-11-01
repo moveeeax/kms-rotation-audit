@@ -15,6 +15,7 @@ type fakeKMS struct {
 	meta     map[string]types.KeyMetadata
 	rotation map[string]*kms.GetKeyRotationStatusOutput
 	enabled  []string // ids passed to EnableKeyRotation
+	periods  []*int32 // RotationPeriodInDays passed to EnableKeyRotation
 }
 
 func (f *fakeKMS) ListKeys(_ context.Context, in *kms.ListKeysInput, _ ...func(*kms.Options)) (*kms.ListKeysOutput, error) {
@@ -49,6 +50,7 @@ func (f *fakeKMS) GetKeyRotationStatus(_ context.Context, in *kms.GetKeyRotation
 
 func (f *fakeKMS) EnableKeyRotation(_ context.Context, in *kms.EnableKeyRotationInput, _ ...func(*kms.Options)) (*kms.EnableKeyRotationOutput, error) {
 	f.enabled = append(f.enabled, *in.KeyId)
+	f.periods = append(f.periods, in.RotationPeriodInDays)
 	return &kms.EnableKeyRotationOutput{}, nil
 }
 
@@ -156,11 +158,58 @@ func TestAuditPaginates(t *testing.T) {
 
 func TestFixEnablesRotation(t *testing.T) {
 	f := &fakeKMS{}
-	fixed, err := Fix(context.Background(), f, []Finding{{KeyID: "k1"}, {KeyID: "k2"}})
+	fixed, err := Fix(context.Background(), f, []Finding{{KeyID: "k1"}, {KeyID: "k2"}}, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(fixed) != 2 || len(f.enabled) != 2 || f.enabled[0] != "k1" {
 		t.Fatalf("fix should enable rotation on both keys, enabled=%v", f.enabled)
+	}
+}
+
+func TestFixDefaultPeriodWithoutMaxDays(t *testing.T) {
+	f := &fakeKMS{}
+	if _, err := Fix(context.Background(), f, []Finding{{KeyID: "k1"}}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if f.periods[0] != nil {
+		t.Fatalf("without --max-days the period must be left to KMS, got %d", *f.periods[0])
+	}
+}
+
+func TestFixSetsPeriodToMaxDays(t *testing.T) {
+	f := &fakeKMS{}
+	findings := []Finding{
+		{KeyID: "slow", Reason: "rotation period 365d exceeds max 180d"},
+		{KeyID: "off", Reason: "automatic rotation disabled"},
+	}
+	if _, err := Fix(context.Background(), f, findings, Options{MaxDays: 180}); err != nil {
+		t.Fatal(err)
+	}
+	for i, p := range f.periods {
+		if p == nil || *p != 180 {
+			t.Fatalf("key %s: want RotationPeriodInDays=180, got %v", f.enabled[i], p)
+		}
+	}
+}
+
+func TestFixMaxDaysAboveKMSLimitKeepsDefault(t *testing.T) {
+	f := &fakeKMS{}
+	if _, err := Fix(context.Background(), f, []Finding{{KeyID: "k1"}}, Options{MaxDays: 3000}); err != nil {
+		t.Fatal(err)
+	}
+	if f.periods[0] != nil {
+		t.Fatalf("max-days above %d must not be sent, got %d", MaxRotationPeriodDays, *f.periods[0])
+	}
+}
+
+func TestFixRejectsMaxDaysBelowKMSMinimum(t *testing.T) {
+	f := &fakeKMS{}
+	_, err := Fix(context.Background(), f, []Finding{{KeyID: "k1"}}, Options{MaxDays: 30})
+	if err == nil {
+		t.Fatal("want an error for max-days below the KMS minimum")
+	}
+	if len(f.enabled) != 0 {
+		t.Fatalf("no key should be touched, enabled=%v", f.enabled)
 	}
 }
