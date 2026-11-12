@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-12
 
 ### Breaking
 
@@ -18,6 +18,19 @@ All notable changes to this project are documented here. The format follows
   longer reported as violations: KMS does not support automatic rotation for
   them, so `audit` failed CI on keys nobody could fix and `fix` errored on
   them. They are listed as skipped; `--include-unrotatable` reports them.
+
+### Added
+
+- `--all-regions` scans every region enabled for the account (via
+  `ec2:DescribeRegions`), `--regions` an explicit list; up to 4 regions run
+  at once. A region that cannot be scanned is reported and makes the exit
+  code 2. Multi-Region replica keys are reported once, on the primary, when
+  the primary's region is scanned.
+- `--include-unrotatable`.
+
+## [0.2.0] - 2026-11-01
+
+### Fixed
 
 - `fix --max-days N` now sets the rotation period of flagged keys to
   `min(N, 365)` days, so a loose `N` never lengthens a period past the KMS
@@ -34,12 +47,6 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- `--all-regions` scans every region enabled for the account (via
-  `ec2:DescribeRegions`), `--regions` an explicit list; up to 4 regions run
-  at once. A region that cannot be scanned is reported and makes the exit
-  code 2. Multi-Region replica keys are reported once, on the primary, when
-  the primary's region is scanned.
-- `--include-unrotatable`.
 - GitHub Actions example workflow in `examples/github-actions/`.
 
 ## [0.1.0] - 2026-08-26
@@ -47,5 +54,6 @@ All notable changes to this project are documented here. The format follows
 - First release: `audit` and `fix` commands, table and JSON output,
   `--max-days`, `--region`, `--profile`.
 
-[Unreleased]: https://github.com/moveeeax/kms-rotation-audit/compare/v0.1.0...HEAD
+[0.3.0]: https://github.com/moveeeax/kms-rotation-audit/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/moveeeax/kms-rotation-audit/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/moveeeax/kms-rotation-audit/releases/tag/v0.1.0
