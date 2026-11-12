@@ -1,12 +1,36 @@
-[
-  {
-    "keyId": "1234abcd-12ab-34cd-56ef-1234567890ab",
-    "arn": "arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab",
-    "reason": "automatic rotation disabled"
-  },
-  {
-    "keyId": "9f8e7d6c-5b4a-3210-fedc-ba9876543210",
-    "arn": "arn:aws:kms:us-east-1:111122223333:key/9f8e7d6c-5b4a-3210-fedc-ba9876543210",
-    "reason": "rotation period 365d exceeds max 180d"
-  }
-]
+{
+  "findings": [
+    {
+      "keyId": "1234abcd-12ab-34cd-56ef-1234567890ab",
+      "arn": "arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab",
+      "region": "us-east-1",
+      "reason": "automatic rotation disabled"
+    },
+    {
+      "keyId": "9f8e7d6c-5b4a-3210-fedc-ba9876543210",
+      "arn": "arn:aws:kms:eu-west-1:111122223333:key/9f8e7d6c-5b4a-3210-fedc-ba9876543210",
+      "region": "eu-west-1",
+      "reason": "rotation period 365d exceeds max 180d"
+    }
+  ],
+  "skipped": [
+    {
+      "keyId": "0a1b2c3d-4e5f-6789-abcd-ef0123456789",
+      "arn": "arn:aws:kms:us-east-1:111122223333:key/0a1b2c3d-4e5f-6789-abcd-ef0123456789",
+      "region": "us-east-1",
+      "reason": "rotation not supported: imported key material"
+    },
+    {
+      "keyId": "mrk-1234abcd12ab34cd56ef1234567890ab",
+      "arn": "arn:aws:kms:eu-west-1:111122223333:key/mrk-1234abcd12ab34cd56ef1234567890ab",
+      "region": "eu-west-1",
+      "reason": "multi-Region replica, reported on primary arn:aws:kms:us-east-1:111122223333:key/mrk-1234abcd12ab34cd56ef1234567890ab"
+    }
+  ],
+  "errors": [
+    {
+      "region": "ap-southeast-2",
+      "error": "list keys: operation error KMS: ListKeys, https response error StatusCode: 400, api error AccessDeniedException: not authorized"
+    }
+  ]
+}

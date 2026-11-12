@@ -2,7 +2,8 @@
 # key has automatic rotation disabled or rotates less often than 180 days.
 #
 # Copy to .github/workflows/ in the repository that owns the AWS account.
-# The role needs kms:ListKeys, kms:DescribeKey and kms:GetKeyRotationStatus.
+# The role needs kms:ListKeys, kms:DescribeKey, kms:GetKeyRotationStatus and,
+# for --all-regions, ec2:DescribeRegions.
 name: kms-rotation-audit
 
 on:
@@ -31,4 +32,4 @@ jobs:
         run: go install github.com/moveeeax/kms-rotation-audit@latest
 
       - name: Audit
-        run: kms-rotation-audit audit --region us-east-1 --max-days 180
+        run: kms-rotation-audit audit --all-regions --max-days 180
