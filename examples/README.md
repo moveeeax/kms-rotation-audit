@@ -14,18 +14,21 @@ policy) is in [`github-actions/kms-rotation-audit.yml`](github-actions/kms-rotat
 Table output when violations exist:
 
 ```
-KEY ID                                REASON
-1234abcd-12ab-34cd-56ef-1234567890ab  automatic rotation disabled
+REGION     KEY ID                                REASON
+us-east-1  1234abcd-12ab-34cd-56ef-1234567890ab  automatic rotation disabled
 
 1 key(s) violate the rotation policy.
 ```
 
 ## Machine-readable output
 
-`--json` prints an array of findings (see [`findings.json`](findings.json)):
+`--json` prints an object with `findings`, `skipped` (keys where automatic
+rotation does not apply, and multi-Region replicas reported on their primary)
+and `errors` (regions that could not be scanned), see
+[`findings.json`](findings.json):
 
 ```shell
-kms-rotation-audit audit --json --max-days 180
+kms-rotation-audit audit --json --max-days 180 --all-regions
 ```
 
 ## Remediate
@@ -46,5 +49,6 @@ a `--max-days` below 90 because no key could satisfy it:
 kms-rotation-audit fix --region us-east-1 --max-days 180
 ```
 
-Keys that already rotate, AWS-managed keys, disabled keys, and asymmetric keys
-are all left untouched.
+Keys that already rotate, AWS-managed keys, disabled keys, asymmetric keys,
+keys with imported key material, keys in a custom key store, and
+multi-Region replicas are all left untouched.

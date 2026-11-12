@@ -6,7 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Breaking
+
+- `--json` prints an object `{"findings": [...], "skipped": [...],
+  "errors": [...]}` instead of a bare array of findings. Every entry gains a
+  `region` field. The table output gains a REGION column.
+
 ### Fixed
+
+- Keys with imported key material and keys in a custom key store are no
+  longer reported as violations: KMS does not support automatic rotation for
+  them, so `audit` failed CI on keys nobody could fix and `fix` errored on
+  them. They are listed as skipped; `--include-unrotatable` reports them.
 
 - `fix --max-days N` now sets the rotation period of flagged keys to
   `min(N, 365)` days, so a loose `N` never lengthens a period past the KMS
@@ -23,6 +34,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `--all-regions` scans every region enabled for the account (via
+  `ec2:DescribeRegions`), `--regions` an explicit list; up to 4 regions run
+  at once. A region that cannot be scanned is reported and makes the exit
+  code 2. Multi-Region replica keys are reported once, on the primary, when
+  the primary's region is scanned.
+- `--include-unrotatable`.
 - GitHub Actions example workflow in `examples/github-actions/`.
 
 ## [0.1.0] - 2026-08-26

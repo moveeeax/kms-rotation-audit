@@ -25,39 +25,86 @@ type Options struct {
 	// MaxDays flags an enabled key whose rotation period exceeds this many
 	// days. Zero disables the check.
 	MaxDays int
+
+	// IncludeUnrotatable reports keys that cannot have automatic rotation
+	// (imported key material, custom key store) as findings instead of
+	// listing them as skipped.
+	IncludeUnrotatable bool
+
+	// Region is the region the client talks to. It is copied into every
+	// Finding.
+	Region string
+
+	// ScannedRegions holds every region of the run. A multi-Region replica
+	// whose primary is in one of them is skipped, so the key set is
+	// reported once, on the primary. A replica whose primary is outside
+	// the run is audited in its own region.
+	ScannedRegions map[string]bool
 }
 
-// Finding is one key that violates the policy.
+// Finding is one key that violates the policy, or one key the audit skipped.
 type Finding struct {
 	KeyID  string `json:"keyId"`
 	ARN    string `json:"arn"`
+	Region string `json:"region"`
 	Reason string `json:"reason"`
+
+	// Unfixable says why EnableKeyRotation cannot be called on this key.
+	// Fix leaves such findings alone. Empty for keys fix can change.
+	Unfixable string `json:"unfixable,omitempty"`
 }
+
+// Report is the result of an audit.
+type Report struct {
+	Findings []Finding `json:"findings"`
+	// Skipped lists in-scope keys the audit did not judge: keys where
+	// automatic rotation does not apply, and multi-Region replicas reported
+	// on their primary.
+	Skipped []Finding `json:"skipped"`
+	// Errors lists regions whose scan failed. Empty for a complete run.
+	Errors []RegionError `json:"errors"`
+}
+
+// RegionError is a region the audit could not scan.
+type RegionError struct {
+	Region string `json:"region"`
+	Error  string `json:"error"`
+}
+
+// Reasons for keys where automatic rotation does not apply.
+// https://docs.aws.amazon.com/kms/latest/APIReference/API_EnableKeyRotation.html
+const (
+	ReasonImported       = "rotation not supported: imported key material"
+	ReasonCustomKeyStore = "rotation not supported: custom key store"
+)
 
 // Audit lists every customer-managed symmetric encryption key and returns a
 // Finding for each one whose rotation is disabled or slower than opts.MaxDays.
-// AWS-managed keys and keys that are not enabled are skipped.
-func Audit(ctx context.Context, c KMSAPI, opts Options) ([]Finding, error) {
-	var findings []Finding
+// AWS-managed keys, keys that are not enabled, and keys that are not
+// symmetric encryption keys are ignored. Keys with imported key material or
+// in a custom key store go to Report.Skipped unless opts.IncludeUnrotatable
+// is set. Audit never fills Report.Errors; it returns the error instead.
+func Audit(ctx context.Context, c KMSAPI, opts Options) (Report, error) {
+	var rep Report
 	var marker *string
 
 	for {
 		out, err := c.ListKeys(ctx, &kms.ListKeysInput{Marker: marker})
 		if err != nil {
-			return nil, fmt.Errorf("list keys: %w", err)
+			return Report{}, fmt.Errorf("list keys: %w", err)
 		}
 
 		for _, k := range out.Keys {
 			id := aws.ToString(k.KeyId)
-			f, skip, err := inspect(ctx, c, id, opts)
+			f, skipped, err := inspect(ctx, c, id, opts)
 			if err != nil {
-				return nil, err
+				return Report{}, err
 			}
-			if skip {
-				continue
+			if skipped != nil {
+				rep.Skipped = append(rep.Skipped, *skipped)
 			}
 			if f != nil {
-				findings = append(findings, *f)
+				rep.Findings = append(rep.Findings, *f)
 			}
 		}
 
@@ -67,47 +114,93 @@ func Audit(ctx context.Context, c KMSAPI, opts Options) ([]Finding, error) {
 		marker = out.NextMarker
 	}
 
-	return findings, nil
+	return rep, nil
 }
 
-// inspect examines a single key. skip is true when the key is out of scope
-// (AWS-managed, not enabled, or not a symmetric encryption key).
-func inspect(ctx context.Context, c KMSAPI, id string, opts Options) (f *Finding, skip bool, err error) {
+// inspect examines a single key. It returns a finding, a skipped entry, or
+// neither when the key is out of scope (AWS-managed, not enabled, not a
+// symmetric encryption key) or complies.
+func inspect(ctx context.Context, c KMSAPI, id string, opts Options) (f, skipped *Finding, err error) {
 	dk, err := c.DescribeKey(ctx, &kms.DescribeKeyInput{KeyId: &id})
 	if err != nil {
-		return nil, false, fmt.Errorf("describe key %s: %w", id, err)
+		return nil, nil, fmt.Errorf("describe key %s: %w", id, err)
 	}
 	md := dk.KeyMetadata
 	if md == nil {
-		return nil, true, nil
+		return nil, nil, nil
 	}
 	if md.KeyManager != types.KeyManagerTypeCustomer {
-		return nil, true, nil // AWS-managed key
+		return nil, nil, nil // AWS-managed key
 	}
 	if md.KeyState != types.KeyStateEnabled {
-		return nil, true, nil // disabled / pending deletion
+		return nil, nil, nil // disabled / pending deletion
 	}
 	if md.KeyUsage != types.KeyUsageTypeEncryptDecrypt || md.KeySpec != types.KeySpecSymmetricDefault {
-		return nil, true, nil // rotation only applies to symmetric encryption keys
+		return nil, nil, nil // rotation only applies to symmetric encryption keys
 	}
 
-	arn := aws.ToString(md.Arn)
+	key := Finding{KeyID: id, ARN: aws.ToString(md.Arn), Region: opts.Region}
+
+	// Rotation of a multi-Region key set is a shared property set on the
+	// primary. Report the set once, on the primary, when the run covers it.
+	primaryRegion, primaryARN, replica := replicaOf(md)
+	if replica {
+		if opts.ScannedRegions[primaryRegion] {
+			key.Reason = fmt.Sprintf("multi-Region replica, reported on primary %s", primaryARN)
+			return nil, &key, nil
+		}
+		key.Unfixable = fmt.Sprintf("multi-Region replica: rotation is set on primary %s", primaryARN)
+	}
+
+	if reason := unrotatable(md); reason != "" {
+		key.Reason = reason
+		if !opts.IncludeUnrotatable {
+			return nil, &key, nil
+		}
+		key.Unfixable = reason
+		return &key, nil, nil
+	}
+
 	rs, err := c.GetKeyRotationStatus(ctx, &kms.GetKeyRotationStatusInput{KeyId: &id})
 	if err != nil {
-		return nil, false, fmt.Errorf("rotation status %s: %w", id, err)
+		return nil, nil, fmt.Errorf("rotation status %s: %w", id, err)
 	}
 
 	if !rs.KeyRotationEnabled {
-		return &Finding{KeyID: id, ARN: arn, Reason: "automatic rotation disabled"}, false, nil
+		key.Reason = "automatic rotation disabled"
+		return &key, nil, nil
 	}
 	if opts.MaxDays > 0 && rs.RotationPeriodInDays != nil && int(*rs.RotationPeriodInDays) > opts.MaxDays {
-		return &Finding{
-			KeyID:  id,
-			ARN:    arn,
-			Reason: fmt.Sprintf("rotation period %dd exceeds max %dd", *rs.RotationPeriodInDays, opts.MaxDays),
-		}, false, nil
+		key.Reason = fmt.Sprintf("rotation period %dd exceeds max %dd", *rs.RotationPeriodInDays, opts.MaxDays)
+		return &key, nil, nil
 	}
-	return nil, false, nil
+	return nil, nil, nil
+}
+
+// unrotatable returns why automatic rotation cannot be enabled on a
+// symmetric encryption key, or "" when it can. KMS rejects EnableKeyRotation
+// for keys with imported key material and for keys in a custom key store
+// (CloudHSM or external).
+func unrotatable(md *types.KeyMetadata) string {
+	switch {
+	case md.CustomKeyStoreId != nil:
+		return ReasonCustomKeyStore + " " + *md.CustomKeyStoreId
+	case md.Origin == types.OriginTypeAwsCloudhsm || md.Origin == types.OriginTypeExternalKeyStore:
+		return ReasonCustomKeyStore
+	case md.Origin == types.OriginTypeExternal:
+		return ReasonImported
+	}
+	return ""
+}
+
+// replicaOf reports whether md is a multi-Region replica key, and if so the
+// region and ARN of its primary.
+func replicaOf(md *types.KeyMetadata) (region, arn string, ok bool) {
+	mrc := md.MultiRegionConfiguration
+	if !aws.ToBool(md.MultiRegion) || mrc == nil || mrc.MultiRegionKeyType != types.MultiRegionKeyTypeReplica || mrc.PrimaryKey == nil {
+		return "", "", false
+	}
+	return aws.ToString(mrc.PrimaryKey.Region), aws.ToString(mrc.PrimaryKey.Arn), true
 }
 
 // Bounds of RotationPeriodInDays accepted by EnableKeyRotation, and the
@@ -130,6 +223,7 @@ func ValidateFixMaxDays(maxDays int) error {
 }
 
 // Fix enables rotation on each flagged key and returns the ids it changed.
+// Findings with Unfixable set are left alone and not returned.
 // When opts.MaxDays is set, it also sets the rotation period to
 // min(opts.MaxDays, DefaultRotationPeriodDays). A tighter policy brings
 // slow keys within it; a looser one never stretches a key past the KMS
@@ -148,6 +242,9 @@ func Fix(ctx context.Context, c KMSAPI, findings []Finding, opts Options) ([]str
 
 	var fixed []string
 	for _, f := range findings {
+		if f.Unfixable != "" {
+			continue
+		}
 		id := f.KeyID
 		in := &kms.EnableKeyRotationInput{KeyId: &id, RotationPeriodInDays: period}
 		if _, err := c.EnableKeyRotation(ctx, in); err != nil {
